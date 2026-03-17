@@ -78,8 +78,8 @@ secmaster/
 │   └── db/
 │       ├── session.py
 │       └── base.py
+├── alembic.ini                   # Alembic config (project root, standard location)
 ├── migrations/
-│   ├── alembic.ini
 │   ├── env.py
 │   └── versions/
 ├── frontend/
@@ -99,7 +99,7 @@ secmaster/
 
 ## Data Model
 
-Adopted from the handoff document (`otc-secmaster-handoff.md`), implemented as SQLModel classes.
+Adopted from the handoff document (`otc-secmaster-handoff.md`), implemented as SQLModel classes. Three tables from the handoff are deferred to post-v1: `security_lifecycle_event` (catch-all event stream), `data_source_observation` (raw vendor audit trail), and `issuer_classification_history` is included (see below) since the UI surfaces classification data.
 
 ### Core tables
 
@@ -119,13 +119,16 @@ Historical identifiers (ticker, CUSIP, ISIN, FIGI, etc.). Fields: `id` (PK), `se
 Security on a venue over time. Fields: `listing_id` (PK), `security_id` (FK), `venue_code`, `mic_code`, `primary_symbol`, `currency`, `country`, `listing_status`, `effective_start_date`, `effective_end_date`, `is_primary_listing_flag`, `created_at`, `updated_at`.
 
 #### `listing_status_history`
-OTC tier, compliance, and tradability context over time. Fields: `id` (PK), `listing_id` (FK), `status_date`, `listing_status`, `tier`, `caveat_emptor_flag`, `unsolicited_quotes_only_flag`, `shell_risk_flag`, `sec_suspension_flag`, `bankruptcy_flag`, `current_information_flag`, `transfer_agent_verified_flag`, `source`, `created_at`.
+OTC tier, compliance, and tradability context over time. Fields: `id` (PK), `listing_id` (FK), `effective_start_date`, `effective_end_date`, `listing_status`, `tier`, `caveat_emptor_flag`, `unsolicited_quotes_only_flag`, `shell_risk_flag`, `sec_suspension_flag`, `bankruptcy_flag`, `current_information_flag`, `transfer_agent_verified_flag`, `source`, `created_at`.
 
 #### `corporate_action`
 Lifecycle and continuity-changing events. Fields: `corporate_action_id` (PK), `security_id` (FK), `issuer_id` (FK), `action_type`, `announcement_date`, `effective_date`, `ratio_from`, `ratio_to`, `old_value`, `new_value`, `notes`, `source`, `created_at`.
 
 #### `shares_outstanding_history`
 Point-in-time capital structure. Fields: `id` (PK), `security_id` (FK), `as_of_date`, `shares_outstanding`, `public_float`, `authorized_shares`, `market_cap`, `enterprise_value`, `value_source_type`, `source`, `created_at`.
+
+#### `issuer_classification_history`
+Historical classification mappings (SIC, NAICS, etc.). Fields: `id` (PK), `issuer_id` (FK), `classification_system`, `classification_code`, `classification_name`, `effective_start_date`, `effective_end_date`, `created_at`.
 
 #### `vendor_security_map`
 Maps vendor identities to canonical internal entities. Fields: `id` (PK), `vendor_name`, `vendor_entity_type`, `vendor_id`, `issuer_id` (FK), `security_id` (FK), `listing_id` (FK), `effective_start_date`, `effective_end_date`, `confidence_score`, `mapping_method`, `created_at`.
@@ -160,13 +163,14 @@ All routes under `/api/v1/`. Versioned from the start since paid users depend on
 | Area | Endpoints | Description |
 |------|-----------|-------------|
 | Issuers | `GET /issuers`, `GET /issuers/{id}`, `GET /issuers/{id}/history` | Browse + issuer profile with name/classification history |
-| Securities | `GET /securities`, `GET /securities/{id}`, `GET /securities/{id}/identifiers`, `GET /securities/{id}/actions` | Browse + security detail, identifier history, corporate actions |
+| Securities | `GET /securities`, `GET /securities/{id}`, `GET /securities/{id}/identifiers`, `GET /securities/{id}/actions`, `GET /securities/{id}/shares-outstanding` | Browse + security detail, identifier history, corporate actions, capital structure |
 | Listings | `GET /listings`, `GET /listings/{id}`, `GET /listings/{id}/status-history` | Browse + listing detail, OTC tier/status timeline |
 | API Keys | `POST /api-keys`, `GET /api-keys`, `DELETE /api-keys/{id}` | Paid users provision/manage keys |
 
 ### Query parameters
 - `?as_of=YYYY-MM-DD` — optional on all read endpoints; when present, all history joins use effective dating filter; when absent, returns current state
 - Cursor-based pagination on all list endpoints
+- List endpoints support filtering via query params: `?ticker=`, `?cusip=`, `?name=`, `?issuer_id=`, `?venue_code=`, `?tier=`, `?status=` (as applicable per entity). These are exact-match or prefix-match filters, not full-text search.
 
 ## Authentication
 
@@ -184,12 +188,19 @@ All routes under `/api/v1/`. Versioned from the start since paid users depend on
 - Enforced via middleware reading `user.tier`
 - No billing integration for v1 (manual upgrades; Stripe later)
 
+### Rate limiting
+- V1: `slowapi` (ASGI rate limiter) with in-memory storage (per-process). Simple and no extra infrastructure.
+- Free tier: 60 requests/minute, 1000 requests/day
+- Paid tier: 300 requests/minute, 10000 requests/day
+- Post-v1: migrate to Redis-backed rate limiting if multi-process or horizontal scaling requires shared state
+
 ## Frontend Architecture
 
 - **Framework:** React + TypeScript + Vite
 - **API client:** Auto-generated from FastAPI's OpenAPI spec
 - **Server state:** TanStack Query (React Query) — caching, pagination, refetching
 - **Routing:** React Router — flat routes (`/issuers/:id`, `/securities/:id`, `/listings/:id`)
+- **Styling:** Tailwind CSS + shadcn/ui component library (accessible, composable, good for data-heavy UIs)
 - **Design:** Desktop-first, responsive. This is a research tool.
 
 ### Pages (v1)
