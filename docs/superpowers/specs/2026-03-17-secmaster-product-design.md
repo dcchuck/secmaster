@@ -99,7 +99,7 @@ secmaster/
 
 ## Data Model
 
-Adopted from the handoff document (`otc-secmaster-handoff.md`), implemented as SQLModel classes. Three tables from the handoff are deferred to post-v1: `security_lifecycle_event` (catch-all event stream), `data_source_observation` (raw vendor audit trail), and `issuer_classification_history` is included (see below) since the UI surfaces classification data.
+Adopted from the handoff document (`otc-secmaster-handoff.md`), implemented as SQLModel classes. Two tables from the handoff are deferred to post-v1: `security_lifecycle_event` (catch-all event stream) and `data_source_observation` (raw vendor audit trail). `issuer_classification_history` is included in v1 since the UI surfaces classification data.
 
 ### Core tables
 
@@ -128,7 +128,7 @@ Lifecycle and continuity-changing events. Fields: `corporate_action_id` (PK), `s
 Point-in-time capital structure. Fields: `id` (PK), `security_id` (FK), `as_of_date`, `shares_outstanding`, `public_float`, `authorized_shares`, `market_cap`, `enterprise_value`, `value_source_type`, `source`, `created_at`.
 
 #### `issuer_classification_history`
-Historical classification mappings (SIC, NAICS, etc.). Fields: `id` (PK), `issuer_id` (FK), `classification_system`, `classification_code`, `classification_name`, `effective_start_date`, `effective_end_date`, `created_at`.
+Historical classification mappings (SIC, NAICS, etc.). Fields: `id` (PK), `issuer_id` (FK), `classification_system`, `classification_code`, `classification_name`, `effective_start_date`, `effective_end_date`, `source`, `created_at`.
 
 #### `vendor_security_map`
 Maps vendor identities to canonical internal entities. Fields: `id` (PK), `vendor_name`, `vendor_entity_type`, `vendor_id`, `issuer_id` (FK), `security_id` (FK), `listing_id` (FK), `effective_start_date`, `effective_end_date`, `confidence_score`, `mapping_method`, `created_at`.
@@ -145,7 +145,7 @@ API keys provisioned by paid users. Fields: `id` (PK), `user_id` (FK), `key_hash
 - Internal canonical IDs (`issuer_id`, `security_id`, `listing_id`) — never ticker as PK
 - `effective_start_date` / `effective_end_date` on all history tables
 - `source` field on all ingested data for vendor lineage
-- `created_at` / `updated_at` on all tables
+- `created_at` on all tables; `updated_at` on mutable entity tables (`issuer`, `security`, `listing`, `user`)
 - Categorical fields (OTC tier, listing status, action type) are string columns with Python-side enum validation — no Postgres enums
 
 ### Point-in-time query pattern
