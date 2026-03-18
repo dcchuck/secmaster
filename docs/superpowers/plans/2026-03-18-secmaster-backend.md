@@ -6,7 +6,9 @@
 
 **Architecture:** Modular monolith — one Python package with clear internal module boundaries. SQLModel unifies ORM and Pydantic schemas. All history tables use effective dating for point-in-time queries. Ingestion is pluggable via abstract base class.
 
-**Tech Stack:** Python 3.12+, FastAPI, SQLModel (SQLAlchemy + Pydantic), PostgreSQL, Alembic, Clerk (JWT auth), slowapi (rate limiting), pydantic-settings
+**Tech Stack:** Python 3.12+ (via mise), FastAPI, SQLModel (SQLAlchemy + Pydantic), PostgreSQL, Alembic, Clerk (JWT auth), slowapi (rate limiting), pydantic-settings
+
+**Tooling:** All runtimes, environment, and dev tasks managed via [mise-en-place](https://mise.jdx.dev/). `mise.toml` is the single source of truth for tool versions and dev workflows.
 
 **Spec:** `docs/superpowers/specs/2026-03-17-secmaster-product-design.md`
 
@@ -18,6 +20,7 @@
 
 ```
 secmaster/
+├── mise.toml                             # mise-en-place: Python version, env, dev tasks
 ├── app/
 │   ├── __init__.py                      # Package marker
 │   ├── main.py                          # FastAPI app, router mounting, startup
@@ -80,9 +83,9 @@ secmaster/
 │       ├── __init__.py
 │       └── test_base.py
 ├── pyproject.toml
+├── .gitignore
 ├── Dockerfile
-├── docker-compose.yml
-└── .env.example
+└── docker-compose.yml
 ```
 
 ---
@@ -90,13 +93,62 @@ secmaster/
 ## Task 1: Project Scaffold & Configuration
 
 **Files:**
+- Create: `mise.toml`
 - Create: `pyproject.toml`
 - Create: `app/__init__.py`
 - Create: `app/config.py`
-- Create: `.env.example`
+- Create: `.gitignore`
 - Create: `docker-compose.yml`
 
-- [ ] **Step 1: Create pyproject.toml with all dependencies**
+- [ ] **Step 1: Create mise.toml (mise-en-place — do this first)**
+
+This is the foundation. All tooling flows through mise.
+
+```toml
+[tools]
+python = "3.12"
+
+[env]
+_.file = ".env"
+
+[tasks.install]
+description = "Install project dependencies"
+run = "pip install -e '.[dev]'"
+
+[tasks.test]
+description = "Run tests"
+run = "pytest tests/ -v"
+
+[tasks.dev]
+description = "Start development server"
+run = "uvicorn app.main:app --reload"
+
+[tasks."db:up"]
+description = "Start database containers"
+run = "docker compose up -d db db-test"
+
+[tasks."db:down"]
+description = "Stop database containers"
+run = "docker compose down"
+
+[tasks."db:reset"]
+description = "Reset database containers (destroy and recreate)"
+run = "docker compose down -v && docker compose up -d db db-test"
+
+[tasks.migrate]
+description = "Run database migrations"
+run = "alembic upgrade head"
+
+[tasks."migrate:create"]
+description = "Create a new migration"
+run = "alembic revision --autogenerate -m \"$1\""
+
+[tasks.verify]
+description = "Verify project setup (config loads, DB connects)"
+run = "python -c \"from app.config import settings; print('DB:', settings.database_url)\""
+```
+
+- [ ] **Step 2: Create pyproject.toml with all dependencies**
 
 ```toml
 [project]
@@ -126,7 +178,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 ```
 
-- [ ] **Step 2: Create docker-compose.yml for Postgres**
+- [ ] **Step 3: Create docker-compose.yml for Postgres**
 
 ```yaml
 services:
@@ -154,20 +206,33 @@ volumes:
   pgdata:
 ```
 
-- [ ] **Step 3: Create .env.example**
+- [ ] **Step 4: Create .gitignore**
 
 ```
-DATABASE_URL=postgresql://secmaster:secmaster@localhost:5432/secmaster
-TEST_DATABASE_URL=postgresql://secmaster_test:secmaster_test@localhost:5433/secmaster_test
-CLERK_SECRET_KEY=
-CLERK_JWKS_URL=
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
 ```
 
-- [ ] **Step 4: Create app/__init__.py**
+- [ ] **Step 5: Create app/__init__.py**
 
 Empty file.
 
-- [ ] **Step 5: Create app/config.py**
+- [ ] **Step 6: Create app/config.py**
 
 ```python
 from pydantic_settings import BaseSettings
@@ -187,21 +252,22 @@ class Settings(BaseSettings):
 settings = Settings()
 ```
 
-- [ ] **Step 6: Install dependencies and verify**
+- [ ] **Step 7: Install tooling and dependencies via mise**
 
 ```bash
-docker compose up -d db db-test
-pip install -e ".[dev]"
-python -c "from app.config import settings; print(settings.database_url)"
+mise install          # installs Python 3.12 (if not already present)
+mise run db:up        # start Postgres containers
+mise run install      # install project dependencies into mise-managed venv
+mise run verify       # confirm config loads
 ```
 
-Expected: prints the database URL.
+Expected: Python 3.12 installed, containers running, dependencies installed, prints the database URL.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add pyproject.toml app/__init__.py app/config.py .env.example docker-compose.yml
-git commit -m "feat: project scaffold with config and docker-compose"
+git add mise.toml .gitignore pyproject.toml app/__init__.py app/config.py docker-compose.yml
+git commit -m "feat: project scaffold with mise, config, and docker-compose"
 ```
 
 ---

@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: secmaster
+      POSTGRES_PASSWORD: secmaster
+      POSTGRES_DB: secmaster
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  db-test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: secmaster_test
+      POSTGRES_PASSWORD: secmaster_test
+      POSTGRES_DB: secmaster_test
+    ports:
+      - "5433:5432"
+
+volumes:
+  pgdata:
