@@ -354,8 +354,11 @@ Create a minimal test to verify DB connectivity:
 
 ```python
 # tests/test_db_connection.py
+from sqlmodel import text
+
+
 def test_db_connection(session):
-    result = session.exec_driver_sql("SELECT 1").scalar()
+    result = session.exec(text("SELECT 1")).scalar()
     assert result == 1
 ```
 
