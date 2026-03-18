@@ -24,13 +24,13 @@ def session(test_engine) -> Generator[Session, None, None]:
 
 @pytest.fixture()
 def client(session) -> Generator[TestClient, None, None]:
-    from app.db.session import get_session
+    from app.api.deps import get_db
     from app.main import app
 
-    def get_session_override():
+    def get_db_override():
         yield session
 
-    app.dependency_overrides[get_session] = get_session_override
+    app.dependency_overrides[get_db] = get_db_override
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
