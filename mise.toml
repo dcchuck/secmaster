@@ -1,0 +1,41 @@
+[tools]
+python = "3.12"
+
+[env]
+_.file = ".env"
+
+[tasks.install]
+description = "Install project dependencies"
+run = "pip install -e '.[dev]'"
+
+[tasks.test]
+description = "Run tests"
+run = "pytest tests/ -v"
+
+[tasks.dev]
+description = "Start development server"
+run = "uvicorn app.main:app --reload"
+
+[tasks."db:up"]
+description = "Start database containers"
+run = "docker compose up -d db db-test"
+
+[tasks."db:down"]
+description = "Stop database containers"
+run = "docker compose down"
+
+[tasks."db:reset"]
+description = "Reset database containers (destroy and recreate)"
+run = "docker compose down -v && docker compose up -d db db-test"
+
+[tasks.migrate]
+description = "Run database migrations"
+run = "alembic upgrade head"
+
+[tasks."migrate:create"]
+description = "Create a new migration"
+run = "alembic revision --autogenerate -m \"$1\""
+
+[tasks.verify]
+description = "Verify project setup (config loads, DB connects)"
+run = "python -c \"from app.config import settings; print('DB:', settings.database_url)\""
