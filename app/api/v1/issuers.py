@@ -4,7 +4,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
-from app.api.deps import CursorPagination, get_as_of, get_db
+from app.api.deps import CursorPagination, get_as_of, get_current_user, get_db
+from app.models.user import User
 from app.models.issuer import (
     Issuer,
     IssuerNameHistory,
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/issuers", tags=["issuers"])
 @router.get("", response_model=dict)
 def list_issuers(
     session: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     pagination: CursorPagination = Depends(),
     name: str | None = Query(default=None),
     country: str | None = Query(default=None),
@@ -45,7 +47,7 @@ def list_issuers(
 
 
 @router.get("/{issuer_id}", response_model=IssuerRead)
-def get_issuer(issuer_id: UUID, session: Session = Depends(get_db)):
+def get_issuer(issuer_id: UUID, session: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     issuer = session.get(Issuer, issuer_id)
     if not issuer:
         raise HTTPException(status_code=404, detail="Issuer not found")
@@ -56,6 +58,7 @@ def get_issuer(issuer_id: UUID, session: Session = Depends(get_db)):
 def get_issuer_history(
     issuer_id: UUID,
     session: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     as_of: date | None = Depends(get_as_of),
 ):
     issuer = session.get(Issuer, issuer_id)

@@ -4,7 +4,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
-from app.api.deps import CursorPagination, get_as_of, get_db
+from app.api.deps import CursorPagination, get_as_of, get_current_user, get_db
+from app.models.user import User
 from app.models.listing import (
     Listing,
     ListingRead,
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/listings", tags=["listings"])
 @router.get("", response_model=dict)
 def list_listings(
     session: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     pagination: CursorPagination = Depends(),
     venue_code: str | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -42,7 +44,7 @@ def list_listings(
 
 
 @router.get("/{listing_id}", response_model=ListingRead)
-def get_listing(listing_id: UUID, session: Session = Depends(get_db)):
+def get_listing(listing_id: UUID, session: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     listing = session.get(Listing, listing_id)
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
@@ -53,6 +55,7 @@ def get_listing(listing_id: UUID, session: Session = Depends(get_db)):
 def get_listing_status_history(
     listing_id: UUID,
     session: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     as_of: date | None = Depends(get_as_of),
 ):
     listing = session.get(Listing, listing_id)
