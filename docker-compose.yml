@@ -19,5 +19,14 @@ services:
     ports:
       - "5433:5432"
 
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://secmaster:secmaster@db:5432/secmaster
+    depends_on:
+      - db
+
 volumes:
   pgdata:

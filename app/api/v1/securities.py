@@ -4,7 +4,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
-from app.api.deps import CursorPagination, get_as_of, get_db
+from app.api.deps import CursorPagination, get_as_of, get_current_user, get_db
+from app.models.user import User
 from app.models.corporate_action import CorporateAction, CorporateActionRead
 from app.models.security import (
     Security,
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/securities", tags=["securities"])
 @router.get("", response_model=dict)
 def list_securities(
     session: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     pagination: CursorPagination = Depends(),
     issuer_id: UUID | None = Query(default=None),
     ticker: str | None = Query(default=None),
@@ -59,7 +61,7 @@ def list_securities(
 
 
 @router.get("/{security_id}", response_model=SecurityRead)
-def get_security(security_id: UUID, session: Session = Depends(get_db)):
+def get_security(security_id: UUID, session: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     security = session.get(Security, security_id)
     if not security:
         raise HTTPException(status_code=404, detail="Security not found")
@@ -70,6 +72,7 @@ def get_security(security_id: UUID, session: Session = Depends(get_db)):
 def get_security_identifiers(
     security_id: UUID,
     session: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     as_of: date | None = Depends(get_as_of),
 ):
     security = session.get(Security, security_id)
@@ -88,6 +91,7 @@ def get_security_identifiers(
 def get_security_actions(
     security_id: UUID,
     session: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     security = session.get(Security, security_id)
     if not security:
@@ -105,6 +109,7 @@ def get_security_actions(
 def get_security_shares_outstanding(
     security_id: UUID,
     session: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     security = session.get(Security, security_id)
     if not security:
