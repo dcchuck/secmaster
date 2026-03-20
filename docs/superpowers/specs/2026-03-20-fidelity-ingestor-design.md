@@ -72,8 +72,38 @@ Faithful port of batcave's `fidelity_automation/` into `tools/fidelity-scraper/`
 - batcave's job system / WebSocket updates
 - Excel parsing logic from `microcap.py` — moves into the ingestor's `transform()`
 
+### Async Note
+
+The batcave scraper uses `async_playwright` with async/await throughout. The secmaster codebase is synchronous. The scraper CLI entrypoint wraps the async code with `asyncio.run()`. Async does **not** leak into the ingestion path — the ingestor remains fully synchronous.
+
 ### Dependencies
-- `playwright` added to project (scraper only, not the server)
+
+Added to `pyproject.toml`:
+- `playwright` — scraper only (browser automation)
+- `openpyxl` — XLSX parsing in the ingestor's `fetch()`/`transform()`
+
+Both are main dependencies (not optional extras) since they're used in the core workflow.
+
+### .gitignore Additions
+
+```
+data/
+fidelity_auth.json
+```
+
+`data/inbox/fidelity/` contains downloaded XLSX files (large, ephemeral). `fidelity_auth.json` contains Fidelity session cookies (sensitive).
+
+### mise Task Definitions
+
+```toml
+[tasks."scrape:fidelity"]
+description = "Scrape microcap data from Fidelity stock screener"
+run = "python -m tools.fidelity_scraper.cli"
+
+[tasks."ingest:fidelity"]
+description = "Ingest Fidelity XLSX files from data/inbox/fidelity/"
+run = "python -m app.ingestion.cli fidelity"
+```
 
 ## Component 2: Fidelity Ingestor
 
@@ -96,14 +126,20 @@ class IngestionLog(SQLModel, table=True):
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
+    updated_at: datetime
 ```
 
 Key behaviors:
 - Dedup on `file_hash` — same file never processed twice, even if renamed
 - Status lifecycle: `pending` → `completed` or `failed`
 - Failed files can be retried by deleting the log entry or adding a `mise run ingest:retry` command
+- Requires an Alembic migration (`mise run migrate:create` → `mise run migrate`) to create the table
 
 ### FidelityIngestor Implementation
+
+The Fidelity ingestor overrides `run()` to manage per-file transaction boundaries and ingestion log tracking. It does **not** use the base class `load()` method, since `BaseIngestor.load()` does a single `session.commit()` which conflicts with per-file transaction isolation.
+
+`transform()` stays pure — it converts raw dicts to domain objects without DB access. Entity resolution and change detection (which require DB reads) live in a separate `_resolve_and_persist()` method called from `run()`. This keeps `transform()` unit-testable without a database.
 
 ```python
 class FidelityIngestor(BaseIngestor):
@@ -113,25 +149,82 @@ class FidelityIngestor(BaseIngestor):
         super().__init__(session)
         self.inbox_path = Path(inbox_path)
 
-    def fetch(self) -> list[RawRecord]:
+    def fetch(self) -> dict[str, list[RawRecord]]:
         # Scan inbox for XLSX files
         # Hash each, check ingestion_log, skip already-processed
         # Parse BasicFacts sheet from each unprocessed file
-        # Create pending ingestion_log entries
-        # Return flat list of row dicts with scrape_date attached
+        # Return rows grouped by filename so run() can process per-file transactions
+        # e.g. {"batch_001_20260320.xlsx": [row1, row2, ...], ...}
 
     def transform(self, raw: list[RawRecord]) -> list[SQLModel]:
-        # For each row: resolve/create Issuer → Security → Listing chain
-        # Compare against existing records, append history only on change
-        # Return all new/updated model instances
+        # Pure transformation: raw dicts → canonical domain objects
+        # No DB access — maps XLSX columns to model fields
+        # Returns Issuer, Security, Listing, *History instances
+
+    def _resolve_and_persist(self, records: list[SQLModel], scrape_date: date) -> tuple[int, int]:
+        # Entity resolution: find existing via VendorSecurityMap or create new
+        # Change detection: compare against current open-ended history records
+        # Point-in-time: end-date old records, insert new only on change
+        # Returns (created_count, updated_count)
 
     def run(self) -> IngestResult:
-        # Override to add per-file status tracking
-        # Update ingestion_log entries to completed/failed
-        # Report: X files processed, Y created, Z updated, N failed
+        # For each unprocessed file in inbox:
+        #   1. Create pending ingestion_log entry
+        #   2. Parse file → fetch() for that file's rows
+        #   3. Transform rows → transform()
+        #   4. Resolve and persist → _resolve_and_persist()
+        #   5. Commit transaction on success, rollback on failure
+        #   6. Update ingestion_log entry (completed/failed)
+        # Aggregate results across all files
 ```
 
-Override `run()` rather than changing `BaseIngestor` — keeps the base class clean for other vendors.
+Overrides `run()` and bypasses `load()` — keeps the base class clean for other vendors that fit the simpler flow.
+
+### Filename Convention
+
+The scraper writes files with the pattern:
+
+```
+microcap_stocks_batch_NNN_YYYYMMDD_HHMMSS.xlsx
+```
+
+Example: `microcap_stocks_batch_001_20260320_143022.xlsx`
+
+The ingestor extracts `scrape_date` by parsing the `YYYYMMDD` portion from the filename using:
+
+```python
+# Match _YYYYMMDD_HHMMSS.xlsx at end of filename
+match = re.search(r'_(\d{8})_\d{6}\.xlsx$', filename)
+scrape_date = date(int(match[1][:4]), int(match[1][4:6]), int(match[1][6:8]))
+```
+
+This date becomes the `effective_start_date` for all point-in-time records created from that file.
+
+### Classification Field Mapping
+
+Fidelity provides free-text Sector and Industry values (e.g., "Technology", "Software - Application"). These map to `IssuerClassificationHistory` as **two separate records per issuer**:
+
+| Fidelity Field | `classification_system` | `classification_code` | `classification_name` |
+|---|---|---|---|
+| Sector | `fidelity_sector` | Normalized lowercase (e.g., `technology`) | Raw Fidelity text (e.g., `Technology`) |
+| Industry | `fidelity_industry` | Normalized lowercase (e.g., `software_application`) | Raw Fidelity text (e.g., `Software - Application`) |
+
+Change detection compares `classification_code` values against the current open-ended record for each system. A sector change and an industry change are tracked independently.
+
+### VendorSecurityMap Usage
+
+One `VendorSecurityMap` row per ticker, pointing to all three entity levels:
+
+| Field | Value |
+|---|---|
+| `vendor_name` | `"fidelity"` |
+| `vendor_entity_type` | `"stock"` |
+| `vendor_id` | Ticker symbol (e.g., `"ACME"`) |
+| `issuer_id` | FK to resolved Issuer |
+| `security_id` | FK to resolved Security |
+| `listing_id` | FK to resolved Listing |
+| `mapping_method` | `"ticker_match"` for first creation, `"vendor_map_lookup"` for subsequent |
+| `confidence_score` | `1.0` (direct match from Fidelity's own data) |
 
 ### Data Flow
 
@@ -147,6 +240,7 @@ Symbol "ACME" from file scraped 2026-03-20
 ├─► Issuer: find by normalized name or create new
 │   └─► IssuerNameHistory: if name differs from latest record, end-date old, insert new
 │   └─► IssuerClassificationHistory: if sector/industry changed, end-date old, insert new
+│       (two records: one for fidelity_sector, one for fidelity_industry)
 │
 ├─► Security: find by issuer + type "common_equity" or create new
 │   └─► SecurityIdentifierHistory: for each identifier (ticker, CUSIP, etc.)
